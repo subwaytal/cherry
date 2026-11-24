@@ -217,6 +217,8 @@ h1 {
   transition: transform 1.1s cubic-bezier(.25,.65,.3,1), filter .8s;
   filter: drop-shadow(var(--arm-shadow) 7px 3px #0004);
 }
+.arm-hit { pointer-events: all; cursor: grab; touch-action: none; }
+.arm-hit:active { cursor: grabbing; }
 .player[data-playing="true"] { --playing: running; --arm-shadow: 2px; }
 .brand {
   position: absolute;
@@ -439,6 +441,7 @@ input[type="range"]::-moz-range-thumb {
           <rect x="556" y="212" width="23" height="9" rx="3" fill="url(#silver)"/>
           <rect x="565" y="205" width="6" height="24" rx="2" fill="#353736"/>
           <g class="tonearm">
+            <rect class="arm-hit" x="516" y="96" width="64" height="330" fill="transparent"/>
             <rect x="542" y="49" width="12" height="67" rx="5" fill="url(#arm-metal)"/>
             <rect x="531" y="42" width="34" height="39" rx="7" fill="url(#counterweight)" stroke="#111"/>
             <path d="M535 48H560M535 73H560" stroke="#767979" stroke-opacity=".35"/>
@@ -508,6 +511,7 @@ input[type="range"]::-moz-range-thumb {
 (() => {
   "use strict";
 
+  let armDragging = false;
   const audio = document.getElementById("audio");
   const player = document.getElementById("player");
   const playButton = document.getElementById("play");
@@ -580,7 +584,7 @@ input[type="range"]::-moz-range-thumb {
     elapsed.textContent = format(current);
     duration.textContent = format(length);
     player.style.setProperty("--progress", `${fraction * 100}%`);
-    player.style.setProperty("--arm-angle", audio.paused ? "5deg" : `${32 + fraction * 18}deg`);
+    if (!armDragging) player.style.setProperty("--arm-angle", audio.paused ? "5deg" : `${32 + fraction * 18}deg`);
   }
 
   function tick() {
@@ -726,6 +730,44 @@ input[type="range"]::-moz-range-thumb {
     audio.pause();
     status.textContent = "음악을 불러올 수 없어요. cherry.mp3 파일을 확인해 주세요.";
   });
+
+  // 톤암을 손가락/마우스로 잡고 레코드 위로 옮기면 그 위치부터 재생한다(32°=처음, 50°=끝). 바깥으로 빼면 일시정지.
+  (function () {
+    const hit = document.querySelector(".arm-hit");
+    const svg = document.querySelector(".arm-svg");
+    const arm = document.querySelector(".tonearm");
+    let angle = 5;
+    const read = e => {
+      const r = svg.getBoundingClientRect();
+      const x = (e.clientX - r.left) * 640 / r.width - 548;
+      const y = (e.clientY - r.top) * 480 / r.height - 100;
+      return clamp(Math.atan2(-x, y) * 180 / Math.PI, 5, 52);
+    };
+    const place = a => {
+      angle = a;
+      player.style.setProperty("--arm-angle", a + "deg");
+      if (a >= 28 && knownDuration()) audio.currentTime = clamp((a - 32) / 18, 0, 1) * audio.duration;
+      const f = knownDuration() ? audio.currentTime / audio.duration : 0;
+      player.style.setProperty("--progress", f * 100 + "%");
+    };
+    hit.addEventListener("pointerdown", e => {
+      armDragging = true;
+      arm.style.transition = "filter .8s";
+      hit.setPointerCapture(e.pointerId);
+      place(read(e));
+      e.preventDefault();
+    });
+    hit.addEventListener("pointermove", e => { if (armDragging) place(read(e)); });
+    const end = () => {
+      if (!armDragging) return;
+      armDragging = false;
+      arm.style.transition = "";
+      if (angle < 26) { audio.pause(); } else if (audio.paused) { start(); }
+      updateProgress();
+    };
+    hit.addEventListener("pointerup", end);
+    hit.addEventListener("pointercancel", end);
+  })();
 
   updateVolume();
   updateProgress();
